@@ -1,0 +1,184 @@
+diff --git a/core/core.cc b/core/core.cc
+index 773f53e..044d455 100644
+--- a/core/core.cc
++++ b/core/core.cc
+@@ -80,6 +80,9 @@ void Kernel::execute(long graph_index, long timestep, long point,
+     assert(timestep >= 0 && point >= 0);
+     execute_kernel_imbalance(*this, graph_index, timestep, point);
+     break;
++  case KernelType::COMPUTE_BOUND_GPU:
++    execute_kernel_compute_bound_gpu(*this, point);
++    break;
+   default:
+     assert(false && "unimplemented kernel type");
+   };
+@@ -95,6 +98,7 @@ static const std::map<std::string, KernelType> ktype_by_name = {
+     {"compute_bound2", KernelType::COMPUTE_BOUND2},
+     {"io_bound", KernelType::IO_BOUND},
+     {"load_imbalance", KernelType::LOAD_IMBALANCE},
++    {"compute_bound_gpu", KernelType::COMPUTE_BOUND_GPU},
+ };
+ 
+ static std::map<KernelType, std::string> make_name_by_ktype()
+@@ -667,7 +671,7 @@ static TaskGraph default_graph(long graph_index)
+   graph.radix = 3;
+   graph.period = -1;
+   graph.fraction_connected = 0.25;
+-  graph.kernel = {KernelType::EMPTY, 0, 16, 0.0};
++  graph.kernel = {KernelType::EMPTY, 0, 16, 0.0, 1024, 512};
+   graph.output_bytes_per_task = sizeof(std::pair<long, long>);
+   graph.scratch_bytes_per_task = 0;
+   graph.nb_fields = 0;
+@@ -697,6 +701,8 @@ static void needs_argument(int i, int argc, const char *flag)
+ #define SCRATCH_FLAG "-scratch"
+ #define SAMPLE_FLAG "-sample"
+ #define IMBALANCE_FLAG "-imbalance"
++#define NBLOCKS_FLAG "-nblocks"
++#define TPBLOCK_FLAG "-tpblock"
+ 
+ #define NODES_FLAG "-nodes"
+ #define SKIP_GRAPH_VALIDATION_FLAG "-skip-graph-validation"
+@@ -937,6 +943,30 @@ App::App(int argc, char **argv)
+       graph.kernel.imbalance = value;
+     }
+ 
++    if (!strcmp(argv[i], NBLOCKS_FLAG)) {
++      needs_argument(i, argc, NBLOCKS_FLAG);
++      long value = atol(argv[++i]);
++      if (value <= 0) {
++        fprintf(stderr,
++                "error: Invalid flag \"" NBLOCKS_FLAG " %ld\" must be > 0\n",
++                value);
++        abort();
++      }
++      graph.kernel.nblocks = value;
++    }
++
++    if (!strcmp(argv[i], TPBLOCK_FLAG)) {
++      needs_argument(i, argc, TPBLOCK_FLAG);
++      long value = atol(argv[++i]);
++      if (value <= 0) {
++        fprintf(stderr,
++                "error: Invalid flag \"" TPBLOCK_FLAG " %ld\" must be > 0\n",
++                value);
++        abort();
++      }
++      graph.kernel.tpblock = value;
++    }
++
+     if (!strcmp(argv[i], FIELD_FLAG)) {
+       needs_argument(i, argc, FIELD_FLAG);
+       int value = atoi(argv[++i]);
+@@ -1158,6 +1188,9 @@ long long count_flops_per_task(const TaskGraph &g, long timestep, long point)
+       return 2 * 64 * iterations + 64;
+     }
+ 
++  case KernelType::COMPUTE_BOUND_GPU:
++    return (long long)g.kernel.nblocks * g.kernel.tpblock * g.kernel.iterations * 32;
++
+   default:
+     assert(false && "unimplemented kernel type");
+   };
+@@ -1182,6 +1215,7 @@ long long count_bytes_per_task(const TaskGraph &g, long timestep, long point)
+   case KernelType::COMPUTE_BOUND2:
+   case KernelType::IO_BOUND:
+   case KernelType::LOAD_IMBALANCE:
++  case KernelType::COMPUTE_BOUND_GPU:
+     return 0;
+   default:
+     assert(false && "unimplemented kernel type");
+diff --git a/core/core_c.h b/core/core_c.h
+index 254c6f7..662c8a8 100644
+--- a/core/core_c.h
++++ b/core/core_c.h
+@@ -49,6 +49,7 @@ typedef enum kernel_type_t {
+   COMPUTE_BOUND2,
+   IO_BOUND,
+   LOAD_IMBALANCE,
++  COMPUTE_BOUND_GPU,
+ } kernel_type_t;
+ 
+ typedef struct kernel_t {
+@@ -57,6 +58,8 @@ typedef struct kernel_t {
+   int samples;
+   double
+       imbalance;  // amount of imbalance as a fraction of the number of iterations
++  long nblocks;
++  long tpblock;
+ } kernel_t;
+ 
+ typedef struct interval_t {
+diff --git a/core/core_kernel.cc b/core/core_kernel.cc
+index 880913d..aea3248 100644
+--- a/core/core_kernel.cc
++++ b/core/core_kernel.cc
+@@ -317,3 +317,41 @@ double execute_kernel_imbalance(const Kernel &kernel, long graph_index,
+   // printf("iteration %ld\n", iterations);
+   return execute_kernel_compute(k);
+ }
++
++#include <omp.h>
++
++void execute_kernel_compute_bound_gpu(const Kernel &kernel, long point)
++{
++  int num_devices = omp_get_num_devices();
++  int device_id = (num_devices > 0) ? (int)(point % num_devices) : 0;
++  long nblocks = kernel.nblocks > 0 ? kernel.nblocks : 1024;
++  long tpblock = kernel.tpblock > 0 ? kernel.tpblock : 512;
++  long iterations = kernel.iterations;
++  long total_threads = nblocks * tpblock;
++
++  float sink = 0.0f;
++  #pragma omp target teams distribute parallel for num_teams(nblocks) thread_limit(tpblock) device(device_id) map(tofrom: sink)
++  for (long i = 0; i < total_threads; ++i) {
++    float a = 1.1f, b = 1.2f, c = 1.3f + (float)(i % 10);
++    #pragma unroll 16
++    for (long iter = 0; iter < iterations; ++iter) {
++      c = a * b + c;
++      a = b * c + a;
++      b = c * a + b;
++      c = a * b + c;
++      a = b * c + a;
++      b = c * a + b;
++      c = a * b + c;
++      a = b * c + a;
++      b = c * a + b;
++      c = a * b + c;
++      a = b * c + a;
++      b = c * a + b;
++      c = a * b + c;
++      a = b * c + a;
++      b = c * a + b;
++      c = a * b + c;
++    }
++    if (c == 0.1234567f) sink += c;
++  }
++}
+diff --git a/core/core_kernel.h b/core/core_kernel.h
+index ee4fe76..dbe5100 100644
+--- a/core/core_kernel.h
++++ b/core/core_kernel.h
+@@ -45,4 +45,6 @@ long select_imbalance_iterations(const Kernel &kernel, long graph_index,
+ double execute_kernel_imbalance(const Kernel &kernel, long graph_index,
+                                 long timestep, long point);
+ 
++void execute_kernel_compute_bound_gpu(const Kernel &kernel, long point);
++
+ #endif
+diff --git a/mpi_openmp/forall.cc b/mpi_openmp/forall.cc
+index 9e83a26..a4ac3ba 100644
+--- a/mpi_openmp/forall.cc
++++ b/mpi_openmp/forall.cc
+@@ -22,7 +22,11 @@
+ 
+ int main(int argc, char *argv[])
+ {
+-  MPI_Init(&argc, &argv);
++  int initialized = 0;
++  MPI_Initialized(&initialized);
++  if (!initialized) {
++    MPI_Init(&argc, &argv);
++  }
+   int n_ranks, rank;
+   MPI_Comm_size(MPI_COMM_WORLD, &n_ranks);
+   MPI_Comm_rank(MPI_COMM_WORLD, &rank);

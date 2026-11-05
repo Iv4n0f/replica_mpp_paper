@@ -1,0 +1,58 @@
+{
+  "cluster_name": "Lenovo ThinkStation P3 Tiny SSCAD-2025 Testbed",
+  "num_nodes": 10,
+  "node_range": "node11 - node20",
+  "master_node": "node11 (alumno11)",
+  "hardware": {
+    "system_model": "Lenovo ThinkStation P3 Tiny (Gen 2)",
+    "form_factor": "Ultra-compact Workstation / Mini-PC",
+    "processor": {
+      "model": "Intel Core Ultra 9 285K / 285T (Arrow Lake Series 2)",
+      "physical_cores": 24,
+      "threads": 24,
+      "hyper_threading": "Disabled by architecture design (1 thread per core)",
+      "base_clock_ghz": 2.5,
+      "boost_clock_ghz": 5.4
+    },
+    "memory_ram": {
+      "capacity_per_node_gb": 32,
+      "effective_available_gb": 30.5,
+      "type": "DDR5 SO-DIMM"
+    },
+    "gpu_accelerator": {
+      "model": "NVIDIA RTX A1000 Laptop GPU",
+      "architecture": "Ampere (GA107)",
+      "compute_capability": "sm_86",
+      "cuda_cores": 2048,
+      "streaming_multiprocessors_sms": 16,
+      "vram_capacity_gb": 4,
+      "vram_type": "GDDR6 (128-bit bus)",
+      "tdp_watts": 35,
+      "pcie_bus": "PCIe 4.0 x8",
+      "theoretical_peak_fp32_tflops": 4.3,
+      "measured_peak_fp32_tflops": 4.42
+    },
+    "storage": {
+      "type": "NVMe PCIe SSD",
+      "capacity_gb": 187,
+      "partition_root": "/dev/nvme0n1p5"
+    },
+    "network": {
+      "interface": "wlp129s0f0",
+      "subnet": "10.7.134.0/23",
+      "netmask": "255.255.254.0",
+      "mtu": 1500,
+      "bandwidth_gbps": 1.0,
+      "ip_assignment": "DHCP / Dynamic"
+    }
+  },
+  "software_stack": {
+    "os": "Ubuntu 24.04 LTS (Noble Numbat)",
+    "kernel": "Linux 6.17.0-1033-oem x86_64",
+    "compiler": "LLVM / Clang 21.0 (with MPI Proxy Plugin Patches)",
+    "mpi_implementation": "OpenMPI 4.1.6 (with MCA params isolating wlp129s0f0)",
+    "cuda_toolkit": "CUDA 12.0 / Drivers 595.x",
+    "benchmarking_framework": "Task Bench (SSCAD 2025 modified with compute_bound_gpu)",
+    "task_kernel": "compute_bound_gpu (nblocks=1024, tpblock=512, unroll=16, 32 FLOPs/iter)"
+  }
+}

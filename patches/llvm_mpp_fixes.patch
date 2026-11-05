@@ -1,0 +1,124 @@
+diff --git a/offload/include/PluginManager.h b/offload/include/PluginManager.h
+index ec3adadf0..3063b8fb2 100644
+--- a/offload/include/PluginManager.h
++++ b/offload/include/PluginManager.h
+@@ -102,7 +102,7 @@ struct PluginManager {
+     // Only called by libomptarget constructor
+     RTLsLoaded = true;
+     for (auto *Desc : DelayedBinDesc)
+-      __tgt_register_lib(Desc);
++      registerLib(Desc);
+     DelayedBinDesc.clear();
+   }
+ 
+diff --git a/offload/liboffload/API/CMakeLists.txt b/offload/liboffload/API/CMakeLists.txt
+index cf6e132aa..faf3a5b6a 100644
+--- a/offload/liboffload/API/CMakeLists.txt
++++ b/offload/liboffload/API/CMakeLists.txt
+@@ -23,24 +23,25 @@ add_public_tablegen_target(OffloadGenerate)
+ 
+ add_custom_target(OffloadAPI DEPENDS OffloadGenerate)
+ find_program(clang_format clang-format PATHS ${LLVM_TOOLS_BINARY_DIR} NO_DEFAULT_PATH)
+-if (clang_format)
+-    foreach(file IN LISTS files_to_copy)
+-      add_custom_command(
+-          OUTPUT ${file}
+-          COMMAND ${clang_format} -i generated/${file}.gen
+-          COMMAND ${CMAKE_COMMAND} -E copy_if_different generated/${file}.gen ${CMAKE_CURRENT_BINARY_DIR}/${file}
+-          DEPENDS generated/${file}.gen
+-      )
+-      add_custom_target(OffloadAPI.${file} DEPENDS ${file})
+-      add_dependencies(OffloadAPI OffloadAPI.${file})
+-    endforeach()
+-else()
++if (NOT clang_format)
+     message(WARNING "clang-format not found, the generated Offload API headers will not be formatted")
+-    foreach(file IN LISTS files_to_copy)
++endif()
++
++foreach(file IN LISTS files_to_copy)
++    if (clang_format)
+         add_custom_command(
+             OUTPUT ${file}
++            COMMAND ${clang_format} -i generated/${file}.gen
+             COMMAND ${CMAKE_COMMAND} -E copy_if_different generated/${file}.gen ${CMAKE_CURRENT_BINARY_DIR}/${file}
+             DEPENDS generated/${file}.gen
+         )
+-    endforeach()
+-endif()
++    else()
++        add_custom_command(
++            OUTPUT ${file}
++            COMMAND ${CMAKE_COMMAND} -E copy_if_different generated/${file}.gen ${CMAKE_CURRENT_BINARY_DIR}/${file}
++            DEPENDS generated/${file}.gen
++        )
++    endif()
++    add_custom_target(OffloadAPI.${file} DEPENDS ${file})
++    add_dependencies(OffloadAPI OffloadAPI.${file})
++endforeach()
+diff --git a/offload/libomptarget/OffloadRTL.cpp b/offload/libomptarget/OffloadRTL.cpp
+index 29b573a27..7ceea89b8 100644
+--- a/offload/libomptarget/OffloadRTL.cpp
++++ b/offload/libomptarget/OffloadRTL.cpp
+@@ -1,3 +1,4 @@
++#include <cstdio>
+ //===----------- rtl.cpp - Target independent OpenMP target RTL -----------===//
+ //
+ // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+diff --git a/offload/plugins-nextgen/mpi/CMakeLists.txt b/offload/plugins-nextgen/mpi/CMakeLists.txt
+index 8bc15981c..8114e1d23 100644
+--- a/offload/plugins-nextgen/mpi/CMakeLists.txt
++++ b/offload/plugins-nextgen/mpi/CMakeLists.txt
+@@ -32,6 +32,7 @@ target_sources(omptarget.rtl.mpi PRIVATE
+ 
+ target_link_libraries(omptarget.rtl.mpi PRIVATE
+   EventSystem
++  MPI::MPI_CXX
+ )
+ 
+ # Add include directories
+@@ -113,6 +114,7 @@ llvm_update_compile_flags(llvm-offload-mpi-proxy-device)
+ 
+ target_link_libraries(llvm-offload-mpi-proxy-device PRIVATE
+   EventSystem
++  MPI::MPI_CXX
+   LLVMSupport
+   omp
+ )
+diff --git a/offload/plugins-nextgen/mpi/event_system/EventSystem.cpp b/offload/plugins-nextgen/mpi/event_system/EventSystem.cpp
+index 1cc7bc173..8b0d756e4 100644
+--- a/offload/plugins-nextgen/mpi/event_system/EventSystem.cpp
++++ b/offload/plugins-nextgen/mpi/event_system/EventSystem.cpp
+@@ -658,7 +658,7 @@ EventSystemTy::EventSystemTy()
+       NumMPIComms("OMPTARGET_NUM_MPI_COMMS", 10) {}
+ 
+ EventSystemTy::~EventSystemTy() {
+-  if (EventSystemState == EventSystemStateTy::FINALIZED)
++  if (EventSystemState == EventSystemStateTy::FINALIZED || EventSystemState == EventSystemStateTy::CREATED)
+     return;
+ 
+   REPORT("Destructing internal event system before deinitializing it.\n");
+diff --git a/offload/plugins-nextgen/mpi/src/rtl.cpp b/offload/plugins-nextgen/mpi/src/rtl.cpp
+index 2f161c837..264ddfa5c 100644
+--- a/offload/plugins-nextgen/mpi/src/rtl.cpp
++++ b/offload/plugins-nextgen/mpi/src/rtl.cpp
+@@ -421,6 +421,9 @@ struct MPIPluginTy : public GenericPluginTy {
+ 
+   /// Initialize the plugin and return the number of devices.
+   Expected<int32_t> initImpl() override {
++    IntEnvar DisableMPIPlugin("OMPTARGET_DISABLE_MPI_PLUGIN", 0);
++    if (DisableMPIPlugin.get())
++      return 0;
+     if (!EventSystem.is_initialized())
+       EventSystem.initialize();
+     int32_t NumRemoteDevices = getNumRemoteDevices();
+@@ -569,6 +572,9 @@ struct MPIPluginTy : public GenericPluginTy {
+   }
+ 
+   int32_t is_plugin_compatible(__tgt_device_image *Image) override {
++    IntEnvar DisableMPIPlugin("OMPTARGET_DISABLE_MPI_PLUGIN", 0);
++    if (DisableMPIPlugin.get())
++      return false;
+     if (!EventSystem.is_initialized())
+       EventSystem.initialize();
+ 
