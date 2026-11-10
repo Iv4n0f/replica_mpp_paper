@@ -203,3 +203,15 @@ c = c.replace(
 with open(path, 'w') as f:
     f.write(c)
 print('Patched core.cc')
+
+# 5. forall.cc (MPI barrier before finalize)
+path = '/home/alumno11/src/task-bench/mpi_openmp/forall.cc'
+if os.path.exists(path):
+    with open(path, 'r') as f:
+        c = f.read()
+    if 'MPI_Barrier(MPI_COMM_WORLD);' not in c:
+        c = c.replace('MPI_Finalize();', 'MPI_Barrier(MPI_COMM_WORLD);\n  MPI_Finalize();')
+        with open(path, 'w') as f:
+            f.write(c)
+        print('Patched forall.cc with MPI_Barrier')
+

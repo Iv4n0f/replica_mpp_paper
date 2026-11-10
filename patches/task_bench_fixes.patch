@@ -166,7 +166,7 @@ index ee4fe76..dbe5100 100644
 +
  #endif
 diff --git a/mpi_openmp/forall.cc b/mpi_openmp/forall.cc
-index 9e83a26..a4ac3ba 100644
+index 9e83a26..44f44e9 100644
 --- a/mpi_openmp/forall.cc
 +++ b/mpi_openmp/forall.cc
 @@ -22,7 +22,11 @@
@@ -182,3 +182,12 @@ index 9e83a26..a4ac3ba 100644
    int n_ranks, rank;
    MPI_Comm_size(MPI_COMM_WORLD, &n_ranks);
    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+@@ -240,5 +244,7 @@ int main(int argc, char *argv[])
+     app.report_timing(elapsed_time);
+   }
+ 
++  MPI_Barrier(MPI_COMM_WORLD);
++
+   MPI_Finalize();
+ }
+
