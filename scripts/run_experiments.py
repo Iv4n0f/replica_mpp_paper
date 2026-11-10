@@ -12,6 +12,7 @@ import re
 import argparse
 import subprocess
 from datetime import datetime
+from pathlib import Path
 
 HOSTS = [f"node{i}" for i in range(11, 21)]
 
@@ -43,6 +44,7 @@ def build_command(sys_type, workers, size, steps, width, radix, output, nblocks,
         hosts_list = ",".join([f"{h}:1" for h in HOSTS[:workers]])
         cmd = [
             "/opt/mpich/bin/mpiexec",
+            "-wdir", "/tmp",
             "-hosts", hosts_list,
             "-n", str(workers),
             "-env", "LD_LIBRARY_PATH", "/opt/llvm-mpp/lib:/opt/mpich/lib:/opt/ucx/lib",
@@ -66,12 +68,14 @@ def build_command(sys_type, workers, size, steps, width, radix, output, nblocks,
         all_hosts = ",".join(proxy_hosts + ["node11:1"])
         cmd = [
             "/opt/mpich/bin/mpiexec",
+            "-wdir", "/tmp",
             "-hosts", all_hosts,
             "-env", "LD_LIBRARY_PATH", "/opt/llvm-mpp/lib:/opt/mpich/lib:/opt/ucx/lib",
             "-env", "UCX_TLS", "tcp,sm",
             "-n", str(workers),
             "/opt/llvm-mpp/bin/llvm-offload-mpi-proxy-device",
             ":",
+            "-wdir", "/tmp",
             "-env", "LD_LIBRARY_PATH", "/opt/llvm-mpp/lib:/opt/mpich/lib:/opt/ucx/lib",
             "-env", "UCX_TLS", "tcp,sm",
             "-env", "CUDA_VISIBLE_DEVICES", "",
@@ -86,6 +90,7 @@ def build_command(sys_type, workers, size, steps, width, radix, output, nblocks,
             "-iter", str(iterations),
             "-nblocks", str(nblocks),
             "-tpblock", str(tpblock),
+            "-worker", str(workers),
         ]
         version = "bin/tb_mpp_a1000"
         hosts_subset = ",".join(HOSTS[:workers])
@@ -198,10 +203,12 @@ def run_experiment(exp_name, output_file, sys_types, workers_list, sizes_list, o
                             print(f"  -> wall_time={row['wall_time']:.6f}s (FLOP/s={row['total_flops']/row['wall_time']:.2e}) in {row['time']:.2f}s [{done_runs}/{total_runs}]", flush=True)
 
 def main():
+    base_dir = Path(__file__).resolve().parent.parent
+    default_outdir = str(base_dir / "results")
     parser = argparse.ArgumentParser(description="SSCAD 2025 Benchmarks Runner")
     parser.add_argument("--experiment", choices=["weak", "strong", "comm", "all", "smoke"], default="smoke")
     parser.add_argument("--trials", type=int, default=3)
-    parser.add_argument("--outdir", default=os.path.expanduser("~/results"))
+    parser.add_argument("--outdir", default=default_outdir)
     args = parser.parse_args()
 
     os.makedirs(args.outdir, exist_ok=True)
