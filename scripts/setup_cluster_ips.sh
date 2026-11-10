@@ -44,11 +44,25 @@ MASTER_PWD="${NODE_PWDS[$MASTER_NODE]}"
 echo "[+] Nodo maestro identificado: $MASTER_NODE ($MASTER_IP) como usuario $MASTER_USER"
 echo "[+] Total nodos cargados: ${#HOSTNAMES[@]}"
 
+declare -A HOST_ALIASES=(
+    ["node11"]="NUEVONOMBRE"
+    ["node12"]="alumno12-ThinkStation-P3-Tiny-Gen-2"
+    ["node13"]="alumno13-ThinkStation-P3-Tiny-Gen-2"
+    ["node14"]="alumno14-ThinkStation-P3-Tiny-Gen-2"
+    ["node15"]="alumno15-ThinkStation-P3-Tiny-Gen-2"
+    ["node16"]="servidor"
+    ["node17"]="head-node"
+    ["node18"]="compute-node-01"
+    ["node19"]="nodo2"
+    ["node20"]="nodo3"
+)
+
 # 2. Generar bloque temporal de /etc/hosts
 HOSTS_BLOCK_FILE=$(mktemp)
 echo "# --- CLUSTER NODES MANAGED BY REPLICATION KIT ---" > "$HOSTS_BLOCK_FILE"
 for h in "${HOSTNAMES[@]}"; do
-    echo "${NODE_IPS[$h]} $h" >> "$HOSTS_BLOCK_FILE"
+    alias="${HOST_ALIASES[$h]:-}"
+    echo "${NODE_IPS[$h]} $h $alias" >> "$HOSTS_BLOCK_FILE"
 done
 echo "# --- END CLUSTER NODES ---" >> "$HOSTS_BLOCK_FILE"
 

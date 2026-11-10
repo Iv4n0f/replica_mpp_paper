@@ -38,15 +38,16 @@ def parse_output(stdout_text):
 def build_command(sys_type, workers, size, steps, width, radix, output, nblocks, tpblock):
     output_bytes = 2 ** output
     iterations = 2 ** (19 - size)
-    hosts_subset = ",".join(HOSTS[:workers])
     
     if sys_type == "mpi":
+        hosts_list = ",".join([f"{h}:1" for h in HOSTS[:workers]])
         cmd = [
-            "mpirun",
-            "-x", "OMPTARGET_DISABLE_MPI_PLUGIN=1",
-            "--host", hosts_subset,
-            "-N", "1",
-            "-np", str(workers),
+            "/opt/mpich/bin/mpiexec",
+            "-hosts", hosts_list,
+            "-n", str(workers),
+            "-env", "LD_LIBRARY_PATH", "/opt/llvm-mpp/lib:/opt/mpich/lib:/opt/ucx/lib",
+            "-env", "UCX_TLS", "tcp,sm",
+            "-env", "OMPTARGET_DISABLE_MPI_PLUGIN", "1",
             "/opt/llvm-mpp/bin/tb_mpi",
             "-steps", str(steps),
             "-width", str(width),
@@ -59,18 +60,22 @@ def build_command(sys_type, workers, size, steps, width, radix, output, nblocks,
             "-tpblock", str(tpblock),
         ]
         version = "bin/tb_mpi_a1000"
+        hosts_subset = ",".join(HOSTS[:workers])
     elif sys_type == "mpp":
+        proxy_hosts = [f"{h}:1" for h in HOSTS[:workers]]
+        all_hosts = ",".join(proxy_hosts + ["node11:1"])
         cmd = [
-            "mpirun",
-            "--oversubscribe",
-            "--host", hosts_subset,
-            "-N", "1",
-            "-np", str(workers),
+            "/opt/mpich/bin/mpiexec",
+            "-hosts", all_hosts,
+            "-env", "LD_LIBRARY_PATH", "/opt/llvm-mpp/lib:/opt/mpich/lib:/opt/ucx/lib",
+            "-env", "UCX_TLS", "tcp,sm",
+            "-n", str(workers),
             "/opt/llvm-mpp/bin/llvm-offload-mpi-proxy-device",
             ":",
-            "--host", "node11",
-            "-x", "CUDA_VISIBLE_DEVICES=",
-            "-np", "1",
+            "-env", "LD_LIBRARY_PATH", "/opt/llvm-mpp/lib:/opt/mpich/lib:/opt/ucx/lib",
+            "-env", "UCX_TLS", "tcp,sm",
+            "-env", "CUDA_VISIBLE_DEVICES", "",
+            "-n", "1",
             "/opt/llvm-mpp/bin/tb_mpp",
             "-steps", str(steps),
             "-width", str(width),
@@ -83,6 +88,7 @@ def build_command(sys_type, workers, size, steps, width, radix, output, nblocks,
             "-tpblock", str(tpblock),
         ]
         version = "bin/tb_mpp_a1000"
+        hosts_subset = ",".join(HOSTS[:workers])
     else:
         raise ValueError(f"Unknown sys_type: {sys_type}")
         
