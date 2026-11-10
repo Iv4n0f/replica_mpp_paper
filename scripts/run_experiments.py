@@ -158,14 +158,17 @@ def run_experiment(exp_name, output_file, sys_types, workers_list, sizes_list, o
                                 print(f"  [TIMEOUT] after {timeout}s: {' '.join(cmd)}", flush=True)
                                 continue
 
-                            if res.returncode != 0:
-                                print(f"  [ERROR exit {res.returncode}]:\n  STDERR: {res.stderr[:300]}", flush=True)
-                                continue
-
                             parsed = parse_output(res.stdout)
-                            if "wall_time" not in parsed:
-                                print(f"  [WARNING] No wall_time in output! Skipping.\n  STDOUT: {res.stdout[:200]}", flush=True)
-                                continue
+                            if res.returncode != 0:
+                                if "wall_time" in parsed:
+                                    print(f"  [RECOVERED exit {res.returncode}]: Output valid, parsed wall_time={parsed['wall_time']}", flush=True)
+                                else:
+                                    print(f"  [ERROR exit {res.returncode}]:\n  STDERR: {res.stderr[:300]}", flush=True)
+                                    continue
+                            else:
+                                if "wall_time" not in parsed:
+                                    print(f"  [WARNING] No wall_time in output! Skipping.\n  STDOUT: {res.stdout[:200]}", flush=True)
+                                    continue
 
                             row = {
                                 "sys_type": sys_type,
