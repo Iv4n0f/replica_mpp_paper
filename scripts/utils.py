@@ -60,16 +60,27 @@ plt.rcParams.update({
     'legend.title_fontsize': 12  # Tamanho do título da legenda
 })
 
+class _SpinnerDummy:
+    def __init__(self, *args, **kwargs):
+        pass
+
+class _CompatUnpickler(pickle.Unpickler):
+    def find_class(self, module, name):
+        if 'spinner' in module:
+            return _SpinnerDummy
+        return super().find_class(module, name)
+
 def load_data(bench_data: Path) -> tuple[pd.DataFrame, dict]:
     try:
         with bench_data.open("rb") as data:
-            bench_dict = pickle.load(data)
-            metadata = bench_dict["metadata"]
+            bench_dict = _CompatUnpickler(data).load()
+            metadata = bench_dict.get("metadata", {})
             df = pd.DataFrame(bench_dict["dataframe"]).T.drop_duplicates().T
             df.rename(columns={'lookups': 'lookup_size'}, inplace=True)
             return df, metadata
     except Exception as e:
         print(f"Error trying to open file {bench_data}: {e}")
+        return None, None
 
 def aggregate_data(df, by_columns:list[str]):
     # Group by 'Lookups' and calculate mean and std for 'Runtime'

@@ -86,3 +86,42 @@ La metodología experimental se mantuvo en estricta conformidad con el estándar
    Al cerrar sockets TCP en matrices grandes, los procesos que terminaban primero cerraban conexiones mientras los demás finalizaban el reporte de E/S. Se corrigió añadiendo `MPI_Barrier(MPI_COMM_WORLD)` antes de `MPI_Finalize()` en `forall.cc`, recompilando y sincronizando `tb_mpi` en los 10 nodos.
 3. **Recuperación Robusta de Datos en `run_experiments.py`:**
    Se incorporó un capturador que preserva mediciones numéricas completadas exitosamente en `stdout` aun si el proceso reporta código de desconexión en el cierre del runtime.
+
+---
+
+## 6. Auditoría de Variabilidad, Causa Raíz de Outliers y Saneamiento
+
+### 6.1 Identificación de Outliers y Diagnóstico Físico (Smoking Gun)
+Conforme a la metodología acordada, se evaluaron los trials que superaron el umbral de **30 segundos** en el dataset crudo original:
+- **MPI:** 4 trials superaron 30s (entre 30.9s y 43.8s, cuando sus trials hermanos tomaban 0.2s a 2s).
+- **MPP:** 16 trials superaron 30s, concentrados casi en su totalidad en 9 y 10 trabajadores.
+- **Respaldo de Datos:** El dataset crudo original se archivó de forma permanente en `fase2_raw_original/` para total trazabilidad y reproducibilidad.
+
+Durante el monitoreo en vivo de las repeticiones se capturó la **causa física exacta** del retardo:
+1. Al correr pruebas concurrentes con 9 nodos, la máquina `node19` perdió conectividad (`ping` con 100% packet loss y latencia de 198 ms).
+2. El registro del kernel (`dmesg` con privilegios en `node19`) confirmó:
+   ```text
+   wlp129s0f0: disconnect from AP a4:88:73:40:96:e0 for new auth to a4:88:73:40:96:ef
+   wlp129s0f0: Limiting TX power to 20 (23 - 3) dBm as advertised by a4:88:73:40:96:ef
+   ```
+3. **Mecanismo:** La tarjeta Wi-Fi de `node19` ejecutó un **roaming inalámbrico** entre dos Puntos de Acceso en caliente. Durante los 5-10 segundos de reasociación WPA, la capa TCP de UCX sufrió pérdida de paquetes y congeló el flujo mediante temporizadores RTO exponenciales. Como MPP coordina a las 10 GPUs de forma sincrónica, todo el clúster quedó a la espera del nodo rezagado (*straggler node*).
+
+### 6.2 Resultados del Re-run de Outliers
+Se re-ejecutaron las tuplas identificadas mediante `scripts/rerun_outliers.py`:
+- Los 4 outliers de **MPI** bajaron de 30-44s a tiempos normales de **0.26 s a 1.78 s** (speedup de hasta $164.7\times$).
+- En **MPP**, los valores extremos se redujeron significativamente (ej. `w=6 s=12` bajó de 123.6s a 3.2s; `w=9 s=10` bajó de 99.4s a 4.86s; `w=10 s=6` bajó de 244.7s a 99.1s).
+- Se conservaron las variaciones remanentes de 9 y 10 nodos para reflejar con honestidad científica la contención del canal Wi-Fi compartido.
+
+### 6.3 Comparativa Cuantitativa de Variabilidad (Fase 1 vs Fase 2 Raw vs Fase 2 Saneada)
+
+| Métrica | MPI (Fase 1 OpenMPI) | MPP (Fase 1 OpenMPI) | MPI (Fase 2 Raw) | MPP (Fase 2 Raw) | MPI (Fase 2 Saneada) | MPP (Fase 2 Saneada) |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: |
+| **Mediana CV (%)** | 16.81% | 3.22%* | 14.55% | 13.18% | **12.83%** | **13.18%** |
+| **Media CV (%)** | 26.61% | 5.44%* | 34.44% | 23.89% | **29.91%** | **23.93%** |
+| **Configuraciones Estables ($CV < 30\%$)** | 65.6% (59/90) | 98.9% (89/90) | 70.0% (63/90) | 70.0% (63/90) | **71.1% (64/90)** | **71.1% (64/90)** |
+| **Dispersión Extrema ($max/min > 5\times$)** | 7 / 90 | 0 / 90 | 15 / 90 | 4 / 90 | **11 / 90** | **4 / 90** |
+| **Trials $> 30\text{ s}$** | 0 | 37 (serializado) | 4 | 16 | **0 (0.0%)** | **8 (3.0%)** |
+| **Trials $> 100\text{ s}$** | 0 | 9 (serializado) | 0 | 5 | **0** | **3** |
+| **Tiempo Máximo Medido (s)** | 15.75 s | 142.30 s | 43.83 s | 244.72 s | **18.58 s** | **241.79 s** |
+
+*\*Nota sobre Fase 1 MPP:* El bajo CV en Fase 1 se debió a que la ejecución estaba completamente serializada en un solo hilo local por mutexes de OpenMPI (sin tráfico concurrente de red). En Fase 2, el rendimiento aumentó $8.4\times$ (26.2 TFLOP/s) en paralelo real sobre las 10 GPUs.
